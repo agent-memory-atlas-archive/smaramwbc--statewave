@@ -95,10 +95,15 @@ def test_heuristic_claim_anchor_is_the_episode_time_not_invented_content():
     ],
 )
 def test_heuristic_emits_fact_without_claim(text):
-    # The memory is still extracted (behavior unchanged); it just carries no claim.
+    # The memory is still extracted; it carries compiler provenance but no claim.
     facts = _facts(text)
     assert facts, "expected the fact to still be emitted"
-    assert all(f.metadata_ == {} for f in facts)
+    assert all("claim" not in f.metadata_ for f in facts)
+    assert all(f.metadata_.get("compiler") == "heuristic" for f in facts)
+    assert all(
+        f.metadata_.get("compiler_version") == "heuristic:1"
+        for f in facts
+    )
 
 
 @pytest.mark.parametrize(
@@ -120,9 +125,11 @@ def test_heuristic_generic_stripe_is_not_a_billing_claim():
 
 
 def test_heuristic_preserves_unrelated_nothing_lost():
-    # No claim case keeps metadata exactly {} (no spurious keys).
+    # No claim is invented; compiler provenance is still recorded.
     facts = _facts("I use Stripe")
-    assert facts and all(f.metadata_ == {} for f in facts)
+    assert facts
+    assert all("claim" not in f.metadata_ for f in facts)
+    assert all(f.metadata_.get("compiler") == "heuristic" for f in facts)
 
 
 # --- LLM claim validation (registry is authoritative, model is untrusted) -----

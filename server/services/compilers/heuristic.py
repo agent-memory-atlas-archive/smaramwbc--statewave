@@ -21,6 +21,19 @@ from server.services.claims import build_claim_envelope
 from server.services.memory_ttl import compute_valid_to
 
 
+_HEURISTIC_COMPILER_REVISION = "1"
+
+
+def _heuristic_compiler_metadata(extra: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Provenance for memories produced by the heuristic compiler."""
+    metadata: dict[str, Any] = {
+        "compiler": "heuristic",
+        "compiler_version": f"heuristic:{_HEURISTIC_COMPILER_REVISION}",
+    }
+    if extra:
+        metadata.update(extra)
+    return metadata
+
 class HeuristicCompiler:
     """Pattern-based memory compiler. Implements BaseCompiler protocol."""
 
@@ -70,7 +83,7 @@ class HeuristicCompiler:
                 valid_from=ep_valid_from,
                 valid_to=compute_valid_to("episode_summary", ep_valid_from, ttl),
                 source_episode_ids=[ep.id],
-                metadata_={},
+                metadata_=_heuristic_compiler_metadata(),
                 status="active",
             )
         )
@@ -90,7 +103,7 @@ class HeuristicCompiler:
                     valid_from=ep_valid_from,
                     valid_to=compute_valid_to("profile_fact", ep_valid_from, ttl),
                     source_episode_ids=[ep.id],
-                    metadata_=claim_md or {},
+                    metadata_=_heuristic_compiler_metadata(claim_md),
                     status="active",
                 )
             )

@@ -45,6 +45,7 @@ from server.services.compilers.errors import CompilationError
 from server.services.llm import LLMResponseError
 from server.services.compilers.heuristic import episode_valid_from, extract_payload_text
 from server.services.memory_ttl import compute_valid_to
+from server.services.compilers.versioning import stable_version
 
 logger = structlog.stdlib.get_logger()
 
@@ -294,6 +295,46 @@ assert "compose, don't atomize" in _SYSTEM_PROMPT_COMPOSE
 def _system_prompt() -> str:
     """Active extraction system prompt — the compose-unit variant when enabled."""
     return _SYSTEM_PROMPT_COMPOSE if settings.compile_compose_unit else _SYSTEM_PROMPT
+
+
+def _prompt_version(*prompts: str) -> str:
+    """Stable fingerprint of the prompt templates that produced a memory."""
+    return stable_version(*prompts)
+
+
+def _llm_compiler_metadata(model: str, *, recall_sweep: bool = False) -> dict[str, str]:
+    """Provenance for the LLM compiler path that produced a memory.
+
+    First-pass memories depend on the active extraction prompt. Recall-sweep
+    memories additionally depend on the sweep prompt and on the first-pass
+    output supplied to that sweep, so their version covers both templates.
+    """
+    main_prompt = _system_prompt()
+
+    if recall_sweep:
+        prompt_version = _prompt_version(main_prompt, _RECALL_SWEEP_PROMPT)
+        pass_name = "recall_sweep"
+    else:
+        prompt_version = _prompt_version(main_prompt)
+        pass_name = "extract"
+
+    compiler_version = stable_version(
+        "llm",
+        model,
+        pass_name,
+        prompt_version,
+    )
+
+    metadata = {
+        "compiler": "llm",
+        "model": model,
+        "prompt_version": prompt_version,
+        "compiler_version": compiler_version,
+    }
+    if recall_sweep:
+        metadata["pass"] = "recall_sweep"
+
+    return metadata
 
 
 def _window_text(
@@ -747,6 +788,11 @@ class LLMCompiler:
                 except Exception:  # pragma: no cover - defensive; never break compile
                     logger.warning("recall_sweep_failed", exc_info=True)
 
+            # The first-pass prompt determines every regular extraction. Recall
+            # memories additionally depend on the sweep prompt and on the
+            # first-pass output shown to that sweep, so its version covers both
+            # prompt templates.
+
             # Map memories back to their source episodes
             results: list[MemoryRow] = []
             for mem in raw_memories:
@@ -785,17 +831,22 @@ class LLMCompiler:
                     summary = str(raw_summary)[:200] if raw_summary else content[:200]
 
                 ep_valid_from = episode_valid_from(source_ep)
+
+                is_recall_sweep = bool(mem.get("_recall_sweep"))
+                metadata: dict[str, Any] = _llm_compiler_metadata(
+                    self._model,
+                    recall_sweep=is_recall_sweep,
+                )
+
                 # Optional, validated claim. A malformed/unknown proposal is
                 # dropped and never fails the rest of the response.
-                metadata: dict[str, Any] = {"compiler": "llm", "model": self._model}
-                if mem.get("_recall_sweep"):
-                    metadata["pass"] = "recall_sweep"
                 try:
                     claim_md = _llm_claim_metadata(mem, default_valid_from=ep_valid_from)
                 except Exception:  # pragma: no cover - defensive; never break compile
                     claim_md = None
                 if claim_md:
                     metadata.update(claim_md)
+
                 results.append(
                     MemoryRow(
                         id=uuid.uuid4(),
@@ -812,7 +863,11 @@ class LLMCompiler:
                     )
                 )
 
-            logger.info("llm_batch_done", episodes=len(batch), memories_extracted=len(results))
+            logger.info(
+                "llm_batch_done",
+                episodes=len(batch),
+                memories_extracted=len(results),
+            )
             return results
 
     async def _call_llm_async(self, text: str, episode_count: int) -> list[dict[str, Any]]:

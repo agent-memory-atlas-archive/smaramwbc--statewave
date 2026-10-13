@@ -52,6 +52,7 @@ from server.services.memory_ttl import compute_valid_to
 
 CANDIDATE_CONTAINER_KEY = "statewave"
 CANDIDATE_LIST_KEY = "memory_candidates"
+_STRUCTURED_COMPILER_VERSION = "structured:1"
 
 # Candidate kind -> stored MemoryKind. No enum change: "domain_fact" maps to the
 # existing ``profile_fact`` kind. Unknown kinds make the container non-acceptable
@@ -165,7 +166,15 @@ def compile_candidates(
     for c in cands:
         kind = _KIND_MAP[c["kind"].strip().lower()]
         text = c["text"]
+
         metadata: dict[str, Any] = dict(c.get("metadata") or {})
+        metadata.update(
+            {
+            "compiler": "structured",
+            "compiler_version": _STRUCTURED_COMPILER_VERSION,
+            }
+        )
+
         claim_md = _candidate_claim_metadata(
             c.get("claim"), default_valid_from=vf, claim_keys=claim_keys
         )
